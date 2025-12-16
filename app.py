@@ -165,7 +165,7 @@ def train_model(uploaded_file):
         except:
             X_res, y_res = X_all_vec, y
             
-        svm = LinearSVC(dual='auto', class_weight='balanced', random_state=42)
+        svm = LinearSVC(dual='True', class_weight='balanced', random_state=42)
         lr = LogisticRegression(solver='liblinear', class_weight='balanced', random_state=42)
         ensemble = VotingClassifier(estimators=[('svm', svm), ('lr', lr)], voting='hard')
         ensemble.fit(X_res, y_res)
@@ -439,4 +439,5 @@ with tab2:
                 fig_n, ax_n = plt.subplots()
                 ax_n.imshow(wc_neg, interpolation='bilinear')
                 ax_n.axis("off")
+
                 st.pyplot(fig_n)
