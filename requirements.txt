@@ -1,8 +1,8 @@
 streamlit
 pandas
-numpy<2.0.0
-scikit-learn==1.2.2
-imbalanced-learn==0.10.1
+numpy
+scikit-learn
+imbalanced-learn
 pyvi
 emoji
 matplotlib
