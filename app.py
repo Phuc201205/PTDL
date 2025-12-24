@@ -7,15 +7,13 @@ import emoji
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pyvi import ViTokenizer
-from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.svm import LinearSVC
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import VotingClassifier
+from sklearn.ensemble import BaggingClassifier
+from sklearn.model_selection import train_test_split
 from imblearn.over_sampling import SMOTE
+from imblearn.under_sampling import RandomUnderSampler
 from wordcloud import WordCloud
-from scipy.stats import norm
-from collections import Counter
-import itertools
 
 # =============================================================================
 # 1. CẤU HÌNH GIAO DIỆN & TỪ ĐIỂN
@@ -26,7 +24,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# CSS tùy chỉnh giao diện
+# CSS tùy chỉnh giao diện (Giữ nguyên của bạn)
 st.markdown("""
 <style>
     .stTextArea textarea {font-size: 16px;}
@@ -55,83 +53,99 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# --- CẤU HÌNH TỪ ĐIỂN (CẬP NHẬT TỪ NOTEBOOK) ---
 ASPECTS = ['BATTERY', 'CAMERA', 'DESIGN', 'FEATURES', 'GENERAL', 'PERFORMANCE', 'PRICE', 'SCREEN', 'SER&ACC', 'STORAGE']
-SENTIMENT_MAP = {1: 'Tiêu cực', 2: 'Trung tính', 3: 'Tích cực'}
+SENTIMENT_MAP = {1: 'Tiêu cực', 2: 'Trung tính', 3: 'Tích cực'} # Map hiển thị
+SENTIMENT_MAP_TRAIN = {'Negative': 1, 'Neutral': 2, 'Positive': 3} # Map train
 
 STATIC_TEENCODE = {
-    "mk": "mình", "mik": "mình", "mjk": "mình", "m": "mình", "t": "tôi", "tui": "tôi",
-    "tao": "tôi", "tớ": "tôi", "b": "bạn", "bn": "bạn", "shop": "cửa hàng", "xốp": "cửa hàng",
-    "nv": "nhân viên", "ship": "giao hàng", "shipper": "người giao hàng",
-    "k": "không", "ko": "không", "kh": "không", "hok": "không", "khum": "không", "not": "không",
-    "dt": "điện thoại", "đt": "điện thoại", "mb": "máy", "mobile": "điện thoại",
-    "ip": "iphone", "ss": "samsung", "sam": "samsung", "táo": "apple",
-    "cam": "camera", "mic": "micro", "loa": "loa", "pin": "pin", "bin": "pin",
-    "sac": "sạc", "cap": "cáp",
-    "dc": "được", "đc": "được", "dk": "được", "ok": "tốt", "oke": "tốt", "ổn": "tốt",
-    "gud": "tốt", "good": "tốt", "bad": "tệ", "lag": "giật", "lác": "giật", "đơ": "đứng máy",
-    "mượt": "nhanh", "nhìu": "nhiều", "wa": "quá", "wá": "quá", "mua": "mua", "xai": "xài",
-    "app": "ứng dụng", "game": "trò chơi", "fb": "facebook", "mess": "tin nhắn",
-    "tr": "triệu", "củ": "triệu"
+    "mk": "mình", "mik": "mình", "mjk": "mình", "m": "mình", "t": "tôi", "tui": "tôi", "tao": "tôi", "b": "bạn", "bn": "bạn",
+    "ad": "admin", "shop": "cửa hàng", "nv": "nhân viên", "ship": "giao hàng",
+    "k": "không", "ko": "không", "kh": "không", "hok": "không", "not": "không", "chả": "chẳng",
+    "yes": "có", "ye": "có", "uk": "ừ", "uhm": "ừ", "r": "rồi",
+    "sp": "sản phẩm", "dt": "điện thoại", "đt": "điện thoại", "dế": "điện thoại", "mb": "máy", "mobile": "điện thoại",
+    "ip": "iphone", "ss": "samsung", "sam": "samsung",
+    "cam": "camera", "mic": "micro", "loa": "loa", "pin": "pin", "sac": "sạc",
+    "dc": "được", "đc": "được", "ok": "tốt", "okie": "tốt", "oke": "tốt", "ổn": "tốt",
+    "chê": "không thích", "khen": "thích", "good": "tốt", "bad": "tệ", "nice": "tốt",
+    "thik": "thích", "iu": "yêu", "love": "yêu",
+    "bth": "bình thường", "bt": "bình thường",
+    "lag": "giật", "đơ": "đứng máy", "mượt": "nhanh",
+    "nhìu": "nhiều", "wa": "quá", "wá": "quá", "qa": "quá", "mua": "mua", "ban": "bán",
+    "wf": "wifi", "4g": "mạng", "net": "mạng", "app": "ứng dụng", "game": "trò chơi",
+    "fb": "facebook", "zalo": "zalo", "mess": "tin nhắn", "ib": "nhắn tin",
+    "bh": "bây giờ", "h": "giờ", "bit": "biết", "vs": "với", "tr": "triệu", "k": "nghìn"
 }
 
 STOPWORDS = set(["bị", "bởi", "cả", "các", "cái", "cần", "càng", "thì", "là", "mà"])
-NEGATION_WORDS = ["không", "chẳng", "chả", "chưa", "đừng", "k", "ko", "kh", "nỏ", "not", "đếch", "éo"]
+
+# TỪ KHÓA ASPECT (CẬP NHẬT)
+ASPECT_KEYWORDS = {
+    'BATTERY': ['pin', 'bin', 'sạc', 'xạc', 'mah'],
+    'CAMERA': ['cam', 'ảnh', 'chụp', 'selfie', 'quay', 'video', 'focus', 'nét'],
+    'DESIGN': ['thiết kế', 'đẹp', 'xấu', 'mỏng', 'nhẹ', 'cầm', 'nắm', 'lưng', 'viền', 'nhựa', 'nhôm', 'kính', 'ngoại hình'],
+    'FEATURES': ['wifi', '4g', '5g', 'sóng', 'vân tay', 'face id', 'loa', 'âm', 'sim', 'esim', 'bluetooth', 'kết nối'],
+    'PERFORMANCE': ['game', 'liên quân', 'pubg', 'lác', 'lag', 'giật', 'mượt', 'nhanh', 'chậm', 'treo', 'đơ', 'nóng', 'nhiệt', 'chip', 'ram', 'tác vụ', 'hiệu năng'],
+    'PRICE': ['giá', 'tiền', 'đắt', 'rẻ', 'hợp lý', 'mắc', 'chi phí', 'ví'],
+    'SCREEN': ['màn', 'hình', 'hiển thị', 'nét', 'rỗ', 'ám', 'tối', 'sáng', 'tần số quét', 'hz', 'oled', 'lcd'],
+    'SER&ACC': ['giao', 'ship', 'đóng gói', 'hộp', 'nhân viên', 'shop', 'tư vấn', 'bảo hành', 'phụ kiện', 'tai nghe', 'cáp', 'củ sạc'],
+    'STORAGE': ['gb', 'tb', 'bộ nhớ', 'lưu', 'trữ', 'dung lượng'],
+    'GENERAL': []
+}
+
+# TỪ KHÓA CẢM XÚC (CẬP NHẬT)
+SENTIMENT_KEYWORDS = [
+    'tốt', 'xấu', 'khen', 'chê', 'ngon', 'dở', 'tệ', 'kém', 'ổn', 'ok', 'được', 'thích', 'yêu', 'ghét',
+    'mượt', 'lag', 'giật', 'đơ', 'nhanh', 'chậm', 'nóng', 'mát', 'ấm', 'trâu', 'yếu', 'bền', 'lởm',
+    'nét', 'mờ', 'rõ', 'nhòe', 'rỗ', 'sắc', 'ảo', 'đẹp', 'xấu', 'sang', 'thô', 'mỏng', 'dày', 'nặng', 'nhẹ',
+    'rẻ', 'đắt', 'hợp lý', 'mắc', 'chát', 'cao', 'thấp',
+    'to', 'nhỏ', 'bé', 'lớn', 'rè', 'vọng', 'êm',
+    'nhạy', 'ngu', 'thông minh', 'lỗi', 'xịn', 'dỏm', 'fake', 'hư', 'hỏng',
+    'nhiệt tình', 'thân thiện', 'láo', 'cọc', 'nhanh', 'lâu', 'chậm', 'cẩn thận', 'móp', 'rách',
+    'thất vọng', 'hài lòng', 'ưng', 'phê', 'chán', 'tiếc', 'phí', 'đáng', 'tuyệt'
+]
 
 # =============================================================================
-# 2. HÀM XỬ LÝ TEXT (CLEANING)
+# 2. HÀM XỬ LÝ TEXT (CẬP NHẬT CLEANING TỪ NOTEBOOK)
 # =============================================================================
-def resolve_ambiguity(text):
-    text = " " + text + " "
-    text = re.sub(r'(\d+)\s*k\b', r'\1 nghìn', text)
-    text = re.sub(r'\bk\b', 'không', text)
-    text = re.sub(r'\b(xin|gửi|tại|ở)\s+(dc|đc)\b', r'\1 địa chỉ', text)
-    text = re.sub(r'\b(dc|đc)\b', 'được', text)
-    return text.strip()
-
-def normalize_repeated_characters(text):
-    return re.sub(r'(\w)\1{2,}', r'\1', text)
-
-def merge_negation(text):
-    words = text.split()
-    new_words = []
-    i = 0
-    while i < len(words):
-        word = words[i]
-        if word in NEGATION_WORDS and i < len(words) - 1:
-            new_words.append(f"{word}_{words[i+1]}")
-            i += 2
-        else:
-            new_words.append(word)
-            i += 1
-    return " ".join(new_words)
-
 def clean_text_ultimate(text):
     if pd.isna(text): return ""
-    text = str(text)
+    text = str(text).lower()
+
+    # [cite_start]Gom nhóm từ khóa Storage [cite: 18]
+    text = re.sub(r'\b\d+\s?(gb|tb|g|mb)\b', ' token_memory ', text)
+    text = re.sub(r'bộ nhớ\s?(trong)?', ' token_memory ', text)
+    text = re.sub(r'lưu trữ', ' token_memory ', text)
+    text = re.sub(r'thẻ nhớ', ' token_memory ', text)
+    text = re.sub(r'đầy\s?bộ\s?nhớ', ' token_memory_full ', text)
+
+    # [cite_start]Gom nhóm màn hình [cite: 18]
+    text = re.sub(r'\b\d+\s?hz\b', ' token_hz ', text)
+    text = re.sub(r'tần số quét', ' token_hz ', text)
+
     text = emoji.demojize(text, delimiters=(" ", " "))
-    text = unicodedata.normalize('NFC', text).lower()
-    text = resolve_ambiguity(text)
-    
+    text = unicodedata.normalize('NFC', text)
+
+    # [cite_start]Xử lý Teencode [cite: 19]
     sorted_keys = sorted(STATIC_TEENCODE.keys(), key=len, reverse=True)
     pattern = re.compile(r'\b(' + '|'.join(map(re.escape, sorted_keys)) + r')\b')
     text = pattern.sub(lambda x: STATIC_TEENCODE[x.group()], text)
-    
-    text = normalize_repeated_characters(text)
-    text = re.sub(r'[^\w\s_:]', ' ', text)
+
+    text = re.sub(r'[^\w\s]', ' ', text)
     text = ViTokenizer.tokenize(text)
-    text = merge_negation(text)
-    
+
+    # [cite_start]Xử lý Stopwords [cite: 20]
     tokens = [t for t in text.split() if t not in STOPWORDS]
     return " ".join(tokens)
 
 # =============================================================================
-# 3. HÀM HUẤN LUYỆN MODEL
+# 3. HÀM HUẤN LUYỆN MODEL (MODEL MỚI: BAGGING + SVM + SMOTE)
 # =============================================================================
 @st.cache_resource
 def train_model(uploaded_file):
     df = pd.read_csv(uploaded_file)
     
-    # Tách nhãn (Label Parsing)
+    # [cite_start]Tách nhãn (Label Parsing) [cite: 21]
     if 'BATTERY' not in df.columns:
         def parse_labels(row):
             res = {asp: 0 for asp in ASPECTS}
@@ -142,111 +156,170 @@ def train_model(uploaded_file):
                 if '#' in tag:
                     parts = tag.split('#')
                     asp, sent = parts[0], parts[1] if len(parts) > 1 else None
-                    if asp in ASPECTS and sent in {'Negative': 1, 'Neutral': 2, 'Positive': 3}: 
-                        res[asp] = {'Negative': 1, 'Neutral': 2, 'Positive': 3}[sent]
+                    if asp in ASPECTS and sent in SENTIMENT_MAP_TRAIN: 
+                        res[asp] = SENTIMENT_MAP_TRAIN[sent]
             return pd.Series(res)
         label_df = df.apply(parse_labels, axis=1)
         df = pd.concat([df, label_df], axis=1)
 
     df['comment_cleaned'] = df['comment'].apply(clean_text_ultimate)
     df_clean = df.dropna(subset=['comment_cleaned'])
-    df_clean = df_clean[(df_clean['comment_cleaned'].apply(lambda x: len(str(x).split())) >= 3)]
+    df_clean = df_clean[df_clean['comment_cleaned'].str.strip().astype(bool)]
 
-    vectorizer = TfidfVectorizer(max_features=20000, ngram_range=(1, 5), min_df=2, sublinear_tf=True)
-    X_all_vec = vectorizer.fit_transform(df_clean['comment_cleaned'])
+    # [cite_start]Vectorizer [cite: 24]
+    vectorizer = TfidfVectorizer(max_features=20000, ngram_range=(1, 3), min_df=2, sublinear_tf=True)
+    X_vec_all = vectorizer.fit_transform(df_clean['comment_cleaned'].values)
     models = {}
 
     progress_bar = st.progress(0)
+    
+    # [cite_start]Loop Training từng Aspect [cite: 25-30]
     for idx, aspect in enumerate(ASPECTS):
-        y = df_clean[aspect]
+        y = df_clean[aspect].values
+        mask = (y != 0)
+        
+        X_curr = X_vec_all[mask]
+        y_curr = y[mask] - 1 # Chuyển 1,2,3 -> 0,1,2
+
+        if len(y_curr) < 10:
+            # Fallback nếu quá ít dữ liệu
+            base_svc = LinearSVC(class_weight='balanced', random_state=42)
+            if len(y_curr) > 0:
+                base_svc.fit(X_curr, y_curr)
+                models[aspect] = base_svc
+            else:
+                models[aspect] = None
+            continue
+
+        X_train, _, y_train, _ = train_test_split(X_curr, y_curr, test_size=0.1, random_state=42, stratify=y_curr)
+
+        # [cite_start]1. Undersampling [cite: 26]
         try:
-            sampler = SMOTE(random_state=42, k_neighbors=1)
-            X_res, y_res = sampler.fit_resample(X_all_vec, y)
+            rus = RandomUnderSampler(random_state=42)
+            X_train_res, y_train_res = rus.fit_resample(X_train, y_train)
         except:
-            X_res, y_res = X_all_vec, y
+            X_train_res, y_train_res = X_train, y_train
             
-        svm = LinearSVC(dual=True, class_weight='balanced', random_state=42)
-        lr = LogisticRegression(solver='liblinear', class_weight='balanced', random_state=42)
-        ensemble = VotingClassifier(estimators=[('svm', svm), ('lr', lr)], voting='hard')
-        ensemble.fit(X_res, y_res)
-        models[aspect] = ensemble
+        # [cite_start]2. SMOTE [cite: 27]
+        try:
+            min_samples = sorted(dict(pd.Series(y_train_res).value_counts()).values())[0]
+            k = min(3, min_samples - 1)
+            if k > 0:
+                smote = SMOTE(k_neighbors=k, random_state=42)
+                X_train_res, y_train_res = smote.fit_resample(X_train_res, y_train_res)
+        except:
+            pass
+
+        # [cite_start]3. Bagging Classifier [cite: 29]
+        base_svc = LinearSVC(class_weight='balanced', random_state=42, dual=False, max_iter=3000)
+        model = BaggingClassifier(estimator=base_svc, n_estimators=10, random_state=42, n_jobs=-1)
+        
+        model.fit(X_train_res, y_train_res)
+        models[aspect] = model
+        
         progress_bar.progress((idx + 1) / len(ASPECTS))
     
     progress_bar.empty()
     return vectorizer, models, df_clean
 
 # =============================================================================
-# 4. HARD RULES V4.1
+# 4. HARD RULES & HYBRID LOGIC (CẬP NHẬT MỚI)
 # =============================================================================
+def has_aspect_keyword(text, aspect):
+    if aspect == 'GENERAL': return True
+    keywords = ASPECT_KEYWORDS.get(aspect, [])
+    return any(kw in text for kw in keywords)
+
+def has_sentiment_keyword(text):
+    return any(kw in text for kw in SENTIMENT_KEYWORDS)
+
+def check_strict_sentiment(raw_text, aspect):
+    if aspect == 'GENERAL': return True
+    segments = re.split(r'[.,;!]+', raw_text)
+    for seg in segments:
+        seg_clean = clean_text_ultimate(seg).lower().replace('_', ' ')
+        if has_aspect_keyword(seg_clean, aspect):
+            if has_sentiment_keyword(seg_clean):
+                return True
+    return False
+
 def apply_hard_rules_hybrid(text, pred_vector):
     text_lower = text.lower()
-    def set_sent(asp_name, val):
+    
+    def set_force(asp_name, val):
         idx = ASPECTS.index(asp_name)
         pred_vector[idx] = val
+
     def has_kw(keywords):
         return any(kw in text_lower for kw in keywords)
 
-    # 1. Cấu trúc câu
+    # [cite_start]Từ khóa phủ định & khen chốt [cite: 32]
+    neg_dep = ['không đẹp', 'ko đẹp', 'k đẹp', 'chả đẹp', 'chẳng đẹp', 'xấu', 'thô']
+    neg_net = ['không nét', 'ko nét', 'k nét', 'mờ', 'không rõ', 'k rõ']
+    pos_design_strong = ['máy đẹp', 'đt đẹp', 'điện thoại đẹp', 'thiết kế đẹp', 'ngoại hình đẹp', 'nhìn đẹp']
+
+    # [cite_start]1. Luật cấu trúc [cite: 33]
     contrast_words = ['tuy nhiên', 'nhưng mà', 'có điều', 'mỗi tội', 'điểm trừ', 'tiếc là']
     for word in contrast_words:
         if word in text_lower:
             parts = text_lower.split(word)
             if len(parts) > 1:
                 after_part = parts[1]
-                if 'cam' in after_part or 'ảnh' in after_part: set_sent('CAMERA', 1)
-                if 'pin' in after_part: set_sent('BATTERY', 1)
-                if 'màn' in after_part: set_sent('SCREEN', 1)
-                if 'loa' in after_part: set_sent('FEATURES', 1)
-                if 'nóng' in after_part: set_sent('PERFORMANCE', 1)
+                if 'cam' in after_part and not has_kw(['nét', 'đẹp']): set_force('CAMERA', 1)
+                if 'pin' in after_part: set_force('BATTERY', 1)
+                if 'màn' in after_part: set_force('SCREEN', 1)
+                if 'nóng' in after_part: set_force('PERFORMANCE', 1)
 
-    # 2. Domain Rules
-    if has_kw(['pin', 'bin']):
-        if has_kw(['trâu', 'khỏe', 'lâu', 'cả ngày', 'ngon', 'mạnh', 'tốt', 'ổn', 'bền']): set_sent('BATTERY', 3)
-        if has_kw(['tuột', 'tụt', 'yếu', 'hẻo', 'nhanh hết', 'sụt']): set_sent('BATTERY', 1)
-
-    if has_kw(['màn hình', 'màn']):
-        if has_kw(['nét', 'đẹp', 'sắc', 'nhạy', 'mượt']): set_sent('SCREEN', 3)
-        if has_kw(['rỗ', 'ám vàng', 'tối', 'đơ', 'loạn', 'liệt', 'nhòe']): set_sent('SCREEN', 1)
-
-    if has_kw(['cam', 'ảnh', 'chụp', 'selfie', 'quay']):
-        if has_kw(['nét', 'đẹp', 'ảo', 'ngon', 'rõ', 'xuất sắc']): set_sent('CAMERA', 3)
-        elif has_kw(['mờ', 'xấu', 'bể', 'nhòe', 'tệ', 'kém', 'rung']): set_sent('CAMERA', 1)
-
-    if has_kw(['nóng', 'ấm máy', 'tỏa nhiệt']): set_sent('PERFORMANCE', 1)
-    if has_kw(['game', 'liên quân', 'pubg', 'tác vụ', 'máy']):
-        if has_kw(['mượt', 'ngon', 'phê', 'nhanh', 'mạnh']): set_sent('PERFORMANCE', 3)
-        if has_kw(['lag', 'giật', 'khựng', 'đứng', 'văng']): set_sent('PERFORMANCE', 1)
-    if has_kw(['lag', 'giật', 'treo logo']): set_sent('PERFORMANCE', 1)
-
-    if has_kw(['giao hàng', 'ship', 'vận chuyển', 'đặt hàng']):
-        if has_kw(['nhanh', 'lẹ', 'sớm', 'hỏa tốc']): 
-            set_sent('SER&ACC', 3)
-            pred_vector[ASPECTS.index('PERFORMANCE')] = 0 
-        if has_kw(['lâu', 'chậm', 'lề mề']): set_sent('SER&ACC', 1)
+    # [cite_start]2. Luật chuyên sâu [cite: 35-41]
     
-    if has_kw(['đóng gói', 'hộp', 'tai nghe', 'sạc']):
-        if has_kw(['cẩn thận', 'đẹp', 'kỹ']): set_sent('SER&ACC', 3)
-        if has_kw(['móp', 'rách', 'thiếu']): set_sent('SER&ACC', 1)
+    # [DESIGN]
+    if has_kw(['thiết kế', 'ngoại hình', 'kiểu dáng', 'máy', 'điện thoại']):
+        if has_kw(pos_design_strong): set_force('DESIGN', 3)
+        elif has_kw(neg_dep) or has_kw(['nhựa', 'ọp ẹp', 'lỏng lẻo', 'cấn']): set_force('DESIGN', 1)
+        elif has_kw(['đẹp', 'sang', 'xịn', 'mỏng', 'nhẹ', 'cầm sướng']): set_force('DESIGN', 3)
 
-    if has_kw(['nhân viên', 'shop', 'tư vấn']):
-        if has_kw(['nhiệt tình', 'dễ thương', 'tốt']): set_sent('SER&ACC', 3)
-        if has_kw(['lồi lõm', 'thái độ', 'bố láo']): set_sent('SER&ACC', 1)
+    # [BATTERY]
+    if has_kw(['pin', 'bin']):
+        if has_kw(['trâu', 'khỏe', 'lâu', 'cả ngày', 'ngon']): set_force('BATTERY', 3)
+        if has_kw(['tuột', 'tụt', 'yếu', 'hẻo', 'nhanh hết', 'sụt', 'kém']): set_force('BATTERY', 1)
+        if has_kw(['trung bình', 'đủ dùng', 'bth', 'bình thường']): set_force('BATTERY', 2)
 
-    if has_kw(['giá', 'tiền', 'túi tiền']):
-        if has_kw(['rẻ', 'tốt', 'hợp lý', 'ok', 'ngon']): set_sent('PRICE', 3)
-        if has_kw(['đắt', 'cao', 'chát']): set_sent('PRICE', 1)
-    if has_kw(['đáng đồng tiền', 'đáng tiền']): set_sent('PRICE', 3)
+    # [SCREEN]
+    if has_kw(['màn hình', 'màn']):
+        if has_kw(neg_dep) or has_kw(neg_net) or has_kw(['rỗ', 'ám', 'tối', 'đơ', 'loạn', 'sọc']): set_force('SCREEN', 1)
+        elif has_kw(['nét', 'đẹp', 'sắc', 'mượt', 'tươi']): set_force('SCREEN', 3)
 
-    if has_kw(['wifi', '4g', 'sóng', 'vân tay', 'face id']):
-        if has_kw(['yếu', 'kém', 'chập chờn', 'lỗi']): set_sent('FEATURES', 1)
-        if has_kw(['nhạy', 'khỏe', 'căng']): set_sent('FEATURES', 3)
-    if has_kw(['loa', 'âm thanh']):
-        if has_kw(['to', 'hay', 'lớn']): set_sent('FEATURES', 3)
-        if has_kw(['bé', 'nhỏ', 'rè']): set_sent('FEATURES', 1)
+    # [CAMERA]
+    if has_kw(['cam', 'ảnh', 'chụp', 'selfie', 'quay']):
+        if has_kw(neg_dep) or has_kw(neg_net) or has_kw(['mờ', 'bể', 'nhòe', 'tệ', 'kém', 'rung', 'bệt']): set_force('CAMERA', 1)
+        elif has_kw(['nét', 'đẹp', 'ảo', 'ngon', 'rõ', 'xuất sắc', 'chi tiết']): set_force('CAMERA', 3)
 
-    if has_kw(['thất vọng', 'đừng mua', 'tránh xa', 'phí tiền', 'hối hận']): set_sent('GENERAL', 1)
-    if has_kw(['nên mua', 'tuyệt vời', 'xuất sắc', 'hài lòng', '10 điểm']):
-        if not any(x == 3 for x in pred_vector): set_sent('GENERAL', 3)
+    # [PERFORMANCE]
+    if has_kw(['nóng', 'ấm máy', 'tỏa nhiệt', 'loạn cảm ứng']): set_force('PERFORMANCE', 1)
+    if has_kw(['lag', 'giật', 'treo logo', 'khựng', 'đứng hình']): set_force('PERFORMANCE', 1)
+    if has_kw(['game', 'liên quân', 'pubg', 'tác vụ', 'hiệu năng']):
+        if has_kw(['k ngon', 'không ngon', 'chán']): set_force('PERFORMANCE', 1)
+        elif has_kw(['mượt', 'phê', 'nhanh', 'chiến', 'ngon']): set_force('PERFORMANCE', 3)
+        elif has_kw(['bình thường', 'ổn', 'tạm']): set_force('PERFORMANCE', 2)
+
+    # [PRICE]
+    idx_price = ASPECTS.index('PRICE')
+    if pred_vector[idx_price] == 3:
+        if not has_kw(['rẻ', 'tốt', 'hợp lý', 'ok', 'ngon', 'giảm', 'sale', 'đáng', 'mềm']):
+            pred_vector[idx_price] = 0
+    if has_kw(['giá', 'tiền']):
+        if has_kw(['rẻ', 'tốt', 'hợp lý', 'mềm']): set_force('PRICE', 3)
+        if has_kw(['đắt', 'cao', 'chát', 'mắc']): set_force('PRICE', 1)
+
+    # [SER&ACC]
+    if has_kw(['nhân viên', 'tư vấn', 'shop', 'phục vụ']):
+        if has_kw(['nhiệt tình', 'tốt', 'dễ thương', 'thân thiện']): set_force('SER&ACC', 3)
+        if has_kw(['thái độ', 'tệ', 'láo', 'cọc']): set_force('SER&ACC', 1)
+
+    # [GENERAL]
+    if has_kw(['thất vọng', 'đừng mua', 'phí tiền']): set_force('GENERAL', 1)
+    if has_kw(['nhìn chung', 'tổng thể']):
+        if has_kw(['đẹp', 'tốt', 'ok']): set_force('GENERAL', 3)
 
     return pred_vector
 
@@ -259,7 +332,7 @@ uploaded_file = st.sidebar.file_uploader("Upload file Training (CSV)", type=['cs
 if uploaded_file is not None:
     st.sidebar.success("File đã tải lên!")
     if st.sidebar.button("Huấn luyện Mô hình 🚀"):
-        with st.spinner("Đang huấn luyện mô hình Ensemble..."):
+        with st.spinner("Đang huấn luyện mô hình Bagging SVC + SMOTE..."):
             try:
                 vectorizer, models, df_visual = train_model(uploaded_file)
                 st.session_state['vectorizer'] = vectorizer
@@ -288,24 +361,46 @@ with tab1:
         if 'models' not in st.session_state:
             st.error("⚠️ Vui lòng huấn luyện mô hình trước!")
         else:
-            # Predict
+            # [cite_start]Predict Logic Hybrid [cite: 43-47]
             cleaned_text = clean_text_ultimate(user_input)
             vec_input = st.session_state['vectorizer'].transform([cleaned_text])
             
-            ml_preds = []
-            for aspect in ASPECTS:
-                ml_preds.append(st.session_state['models'][aspect].predict(vec_input)[0])
+            text_lower_cleaned = cleaned_text.lower().replace('_', ' ')
+            text_raw_lower = user_input.lower()
             
-            final_preds = apply_hard_rules_hybrid(user_input, np.array(ml_preds))
+            mentioned_aspects = [asp for asp in ASPECTS if asp != 'GENERAL' and has_aspect_keyword(text_lower_cleaned, asp)]
+            is_multi_aspect = len(mentioned_aspects) > 1
+
+            ml_preds_vector = []
+            for aspect in ASPECTS:
+                if st.session_state['models'][aspect] is None:
+                    pred_label = 0
+                else:
+                    pred_label = st.session_state['models'][aspect].predict(vec_input)[0] + 1
+                
+                # Bộ lọc Logic
+                if pred_label != 0:
+                    if not has_aspect_keyword(text_lower_cleaned, aspect):
+                        pred_label = 0
+                    elif aspect != 'GENERAL':
+                        if is_multi_aspect:
+                            if not check_strict_sentiment(text_raw_lower, aspect):
+                                pred_label = 0
+                        else:
+                            if not has_sentiment_keyword(text_lower_cleaned):
+                                pred_label = 0
+                ml_preds_vector.append(pred_label)
+            
+            # Áp dụng Hard Rules
+            final_preds = apply_hard_rules_hybrid(user_input, np.array(ml_preds_vector))
             
             # --- TÍNH TOÁN KẾT LUẬN TỔNG QUAN ---
-            # Lọc các aspect có nhắc đến (khác 0)
             active_sentiments = [p for p in final_preds if p != 0]
             
             st.markdown("---")
             
             if not active_sentiments:
-                 st.warning("Không tìm thấy khía cạnh cụ thể nào trong bình luận.")
+                st.warning("Không tìm thấy khía cạnh cụ thể nào trong bình luận.")
             else:
                 n_pos = active_sentiments.count(3)
                 n_neg = active_sentiments.count(1)
@@ -439,6 +534,4 @@ with tab2:
                 fig_n, ax_n = plt.subplots()
                 ax_n.imshow(wc_neg, interpolation='bilinear')
                 ax_n.axis("off")
-
                 st.pyplot(fig_n)
-
