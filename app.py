@@ -505,7 +505,7 @@ with tab2:
                 try:
                     wc_pos = WordCloud(width=400, height=300, background_color="white").generate(positive_text)
                     fig_p, ax_p = plt.subplots()
-                    ax_p.imshow(wc_pos, interpolation='bilinear')
+                    ax_p.imshow(wc_pos.to_image(), interpolation='bilinear')
                     ax_p.axis("off")
                     st.pyplot(fig_p)
                 except ValueError:
@@ -526,3 +526,4 @@ with tab2:
                     st.info("Dữ liệu không đủ để tạo WordCloud.")
             else:
                 st.info("Không có dữ liệu tiêu cực.")
+
