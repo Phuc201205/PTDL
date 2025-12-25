@@ -24,7 +24,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# CSS tùy chỉnh giao diện (Giữ nguyên của bạn)
+# CSS tùy chỉnh giao diện
 st.markdown("""
 <style>
     .stTextArea textarea {font-size: 16px;}
@@ -33,13 +33,24 @@ st.markdown("""
         border-radius: 10px;
         margin-bottom: 10px;
         text-align: center;
-        color: white;
         font-weight: bold;
-        box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+        border: 1px solid #e0e0e0;
+        color: #333;
     }
-    .positive {background-color: #28a745;}
-    .negative {background-color: #dc3545;}
-    .neutral {background-color: #6c757d;}
+    
+    /* Định nghĩa màu sắc cho từng trạng thái */
+    .positive {background-color: #28a745; color: white; border: none;}
+    .negative {background-color: #dc3545; color: white; border: none;}
+    .neutral {background-color: #6c757d; color: white; border: none;}
+    
+    /* Style cho nhãn không rõ ràng (Mới) */
+    .not-mentioned {
+        background-color: #f8f9fa; 
+        color: #6c757d; 
+        border: 1px dashed #ccc;
+        opacity: 0.8;
+    }
     
     .overall-card {
         padding: 20px;
@@ -53,10 +64,17 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- CẤU HÌNH TỪ ĐIỂN (CẬP NHẬT TỪ NOTEBOOK) ---
+# --- CẤU HÌNH TỪ ĐIỂN ---
 ASPECTS = ['BATTERY', 'CAMERA', 'DESIGN', 'FEATURES', 'GENERAL', 'PERFORMANCE', 'PRICE', 'SCREEN', 'SER&ACC', 'STORAGE']
-SENTIMENT_MAP = {1: 'Tiêu cực', 2: 'Trung tính', 3: 'Tích cực'} # Map hiển thị
-SENTIMENT_MAP_TRAIN = {'Negative': 1, 'Neutral': 2, 'Positive': 3} # Map train
+
+# [CẬP NHẬT] Map hiển thị bao gồm cả nhãn 0
+SENTIMENT_MAP = {
+    0: '⚪ Không được đề cập rõ ràng',
+    1: '🔴 Tiêu cực', 
+    2: '🔘 Trung tính', 
+    3: '🟢 Tích cực'
+} 
+SENTIMENT_MAP_TRAIN = {'Negative': 1, 'Neutral': 2, 'Positive': 3}
 
 STATIC_TEENCODE = {
     "mk": "mình", "mik": "mình", "mjk": "mình", "m": "mình", "t": "tôi", "tui": "tôi", "tao": "tôi", "b": "bạn", "bn": "bạn",
@@ -79,7 +97,6 @@ STATIC_TEENCODE = {
 
 STOPWORDS = set(["bị", "bởi", "cả", "các", "cái", "cần", "càng", "thì", "là", "mà"])
 
-# TỪ KHÓA ASPECT (CẬP NHẬT)
 ASPECT_KEYWORDS = {
     'BATTERY': ['pin', 'bin', 'sạc', 'xạc', 'mah'],
     'CAMERA': ['cam', 'ảnh', 'chụp', 'selfie', 'quay', 'video', 'focus', 'nét'],
@@ -93,7 +110,6 @@ ASPECT_KEYWORDS = {
     'GENERAL': []
 }
 
-# TỪ KHÓA CẢM XÚC (CẬP NHẬT)
 SENTIMENT_KEYWORDS = [
     'tốt', 'xấu', 'khen', 'chê', 'ngon', 'dở', 'tệ', 'kém', 'ổn', 'ok', 'được', 'thích', 'yêu', 'ghét',
     'mượt', 'lag', 'giật', 'đơ', 'nhanh', 'chậm', 'nóng', 'mát', 'ấm', 'trâu', 'yếu', 'bền', 'lởm',
@@ -106,27 +122,24 @@ SENTIMENT_KEYWORDS = [
 ]
 
 # =============================================================================
-# 2. HÀM XỬ LÝ TEXT (CẬP NHẬT CLEANING TỪ NOTEBOOK)
+# 2. HÀM XỬ LÝ TEXT
 # =============================================================================
 def clean_text_ultimate(text):
     if pd.isna(text): return ""
     text = str(text).lower()
 
-    # [cite_start]Gom nhóm từ khóa Storage [cite: 18]
     text = re.sub(r'\b\d+\s?(gb|tb|g|mb)\b', ' token_memory ', text)
     text = re.sub(r'bộ nhớ\s?(trong)?', ' token_memory ', text)
     text = re.sub(r'lưu trữ', ' token_memory ', text)
     text = re.sub(r'thẻ nhớ', ' token_memory ', text)
     text = re.sub(r'đầy\s?bộ\s?nhớ', ' token_memory_full ', text)
 
-    # [cite_start]Gom nhóm màn hình [cite: 18]
     text = re.sub(r'\b\d+\s?hz\b', ' token_hz ', text)
     text = re.sub(r'tần số quét', ' token_hz ', text)
 
     text = emoji.demojize(text, delimiters=(" ", " "))
     text = unicodedata.normalize('NFC', text)
 
-    # [cite_start]Xử lý Teencode [cite: 19]
     sorted_keys = sorted(STATIC_TEENCODE.keys(), key=len, reverse=True)
     pattern = re.compile(r'\b(' + '|'.join(map(re.escape, sorted_keys)) + r')\b')
     text = pattern.sub(lambda x: STATIC_TEENCODE[x.group()], text)
@@ -134,18 +147,16 @@ def clean_text_ultimate(text):
     text = re.sub(r'[^\w\s]', ' ', text)
     text = ViTokenizer.tokenize(text)
 
-    # [cite_start]Xử lý Stopwords [cite: 20]
     tokens = [t for t in text.split() if t not in STOPWORDS]
     return " ".join(tokens)
 
 # =============================================================================
-# 3. HÀM HUẤN LUYỆN MODEL (MODEL MỚI: BAGGING + SVM + SMOTE)
+# 3. HÀM HUẤN LUYỆN MODEL
 # =============================================================================
 @st.cache_resource
 def train_model(uploaded_file):
     df = pd.read_csv(uploaded_file)
     
-    # [cite_start]Tách nhãn (Label Parsing) [cite: 21]
     if 'BATTERY' not in df.columns:
         def parse_labels(row):
             res = {asp: 0 for asp in ASPECTS}
@@ -166,23 +177,20 @@ def train_model(uploaded_file):
     df_clean = df.dropna(subset=['comment_cleaned'])
     df_clean = df_clean[df_clean['comment_cleaned'].str.strip().astype(bool)]
 
-    # [cite_start]Vectorizer [cite: 24]
     vectorizer = TfidfVectorizer(max_features=20000, ngram_range=(1, 3), min_df=2, sublinear_tf=True)
     X_vec_all = vectorizer.fit_transform(df_clean['comment_cleaned'].values)
     models = {}
 
     progress_bar = st.progress(0)
     
-    # [cite_start]Loop Training từng Aspect [cite: 25-30]
     for idx, aspect in enumerate(ASPECTS):
         y = df_clean[aspect].values
         mask = (y != 0)
         
         X_curr = X_vec_all[mask]
-        y_curr = y[mask] - 1 # Chuyển 1,2,3 -> 0,1,2
+        y_curr = y[mask] - 1 
 
         if len(y_curr) < 10:
-            # Fallback nếu quá ít dữ liệu
             base_svc = LinearSVC(class_weight='balanced', random_state=42)
             if len(y_curr) > 0:
                 base_svc.fit(X_curr, y_curr)
@@ -193,14 +201,12 @@ def train_model(uploaded_file):
 
         X_train, _, y_train, _ = train_test_split(X_curr, y_curr, test_size=0.1, random_state=42, stratify=y_curr)
 
-        # [cite_start]1. Undersampling [cite: 26]
         try:
             rus = RandomUnderSampler(random_state=42)
             X_train_res, y_train_res = rus.fit_resample(X_train, y_train)
         except:
             X_train_res, y_train_res = X_train, y_train
             
-        # [cite_start]2. SMOTE [cite: 27]
         try:
             min_samples = sorted(dict(pd.Series(y_train_res).value_counts()).values())[0]
             k = min(3, min_samples - 1)
@@ -210,7 +216,6 @@ def train_model(uploaded_file):
         except:
             pass
 
-        # [cite_start]3. Bagging Classifier [cite: 29]
         base_svc = LinearSVC(class_weight='balanced', random_state=42, dual=False, max_iter=3000)
         model = BaggingClassifier(estimator=base_svc, n_estimators=10, random_state=42, n_jobs=-1)
         
@@ -223,7 +228,7 @@ def train_model(uploaded_file):
     return vectorizer, models, df_clean
 
 # =============================================================================
-# 4. HARD RULES & HYBRID LOGIC (CẬP NHẬT MỚI)
+# 4. HARD RULES & HYBRID LOGIC
 # =============================================================================
 def has_aspect_keyword(text, aspect):
     if aspect == 'GENERAL': return True
@@ -253,12 +258,10 @@ def apply_hard_rules_hybrid(text, pred_vector):
     def has_kw(keywords):
         return any(kw in text_lower for kw in keywords)
 
-    # [cite_start]Từ khóa phủ định & khen chốt [cite: 32]
     neg_dep = ['không đẹp', 'ko đẹp', 'k đẹp', 'chả đẹp', 'chẳng đẹp', 'xấu', 'thô']
     neg_net = ['không nét', 'ko nét', 'k nét', 'mờ', 'không rõ', 'k rõ']
     pos_design_strong = ['máy đẹp', 'đt đẹp', 'điện thoại đẹp', 'thiết kế đẹp', 'ngoại hình đẹp', 'nhìn đẹp']
 
-    # [cite_start]1. Luật cấu trúc [cite: 33]
     contrast_words = ['tuy nhiên', 'nhưng mà', 'có điều', 'mỗi tội', 'điểm trừ', 'tiếc là']
     for word in contrast_words:
         if word in text_lower:
@@ -270,31 +273,24 @@ def apply_hard_rules_hybrid(text, pred_vector):
                 if 'màn' in after_part: set_force('SCREEN', 1)
                 if 'nóng' in after_part: set_force('PERFORMANCE', 1)
 
-    # [cite_start]2. Luật chuyên sâu [cite: 35-41]
-    
-    # [DESIGN]
     if has_kw(['thiết kế', 'ngoại hình', 'kiểu dáng', 'máy', 'điện thoại']):
         if has_kw(pos_design_strong): set_force('DESIGN', 3)
         elif has_kw(neg_dep) or has_kw(['nhựa', 'ọp ẹp', 'lỏng lẻo', 'cấn']): set_force('DESIGN', 1)
         elif has_kw(['đẹp', 'sang', 'xịn', 'mỏng', 'nhẹ', 'cầm sướng']): set_force('DESIGN', 3)
 
-    # [BATTERY]
     if has_kw(['pin', 'bin']):
         if has_kw(['trâu', 'khỏe', 'lâu', 'cả ngày', 'ngon']): set_force('BATTERY', 3)
         if has_kw(['tuột', 'tụt', 'yếu', 'hẻo', 'nhanh hết', 'sụt', 'kém']): set_force('BATTERY', 1)
         if has_kw(['trung bình', 'đủ dùng', 'bth', 'bình thường']): set_force('BATTERY', 2)
 
-    # [SCREEN]
     if has_kw(['màn hình', 'màn']):
         if has_kw(neg_dep) or has_kw(neg_net) or has_kw(['rỗ', 'ám', 'tối', 'đơ', 'loạn', 'sọc']): set_force('SCREEN', 1)
         elif has_kw(['nét', 'đẹp', 'sắc', 'mượt', 'tươi']): set_force('SCREEN', 3)
 
-    # [CAMERA]
     if has_kw(['cam', 'ảnh', 'chụp', 'selfie', 'quay']):
         if has_kw(neg_dep) or has_kw(neg_net) or has_kw(['mờ', 'bể', 'nhòe', 'tệ', 'kém', 'rung', 'bệt']): set_force('CAMERA', 1)
         elif has_kw(['nét', 'đẹp', 'ảo', 'ngon', 'rõ', 'xuất sắc', 'chi tiết']): set_force('CAMERA', 3)
 
-    # [PERFORMANCE]
     if has_kw(['nóng', 'ấm máy', 'tỏa nhiệt', 'loạn cảm ứng']): set_force('PERFORMANCE', 1)
     if has_kw(['lag', 'giật', 'treo logo', 'khựng', 'đứng hình']): set_force('PERFORMANCE', 1)
     if has_kw(['game', 'liên quân', 'pubg', 'tác vụ', 'hiệu năng']):
@@ -302,7 +298,6 @@ def apply_hard_rules_hybrid(text, pred_vector):
         elif has_kw(['mượt', 'phê', 'nhanh', 'chiến', 'ngon']): set_force('PERFORMANCE', 3)
         elif has_kw(['bình thường', 'ổn', 'tạm']): set_force('PERFORMANCE', 2)
 
-    # [PRICE]
     idx_price = ASPECTS.index('PRICE')
     if pred_vector[idx_price] == 3:
         if not has_kw(['rẻ', 'tốt', 'hợp lý', 'ok', 'ngon', 'giảm', 'sale', 'đáng', 'mềm']):
@@ -311,12 +306,10 @@ def apply_hard_rules_hybrid(text, pred_vector):
         if has_kw(['rẻ', 'tốt', 'hợp lý', 'mềm']): set_force('PRICE', 3)
         if has_kw(['đắt', 'cao', 'chát', 'mắc']): set_force('PRICE', 1)
 
-    # [SER&ACC]
     if has_kw(['nhân viên', 'tư vấn', 'shop', 'phục vụ']):
         if has_kw(['nhiệt tình', 'tốt', 'dễ thương', 'thân thiện']): set_force('SER&ACC', 3)
         if has_kw(['thái độ', 'tệ', 'láo', 'cọc']): set_force('SER&ACC', 1)
 
-    # [GENERAL]
     if has_kw(['thất vọng', 'đừng mua', 'phí tiền']): set_force('GENERAL', 1)
     if has_kw(['nhìn chung', 'tổng thể']):
         if has_kw(['đẹp', 'tốt', 'ok']): set_force('GENERAL', 3)
@@ -337,7 +330,7 @@ if uploaded_file is not None:
                 vectorizer, models, df_visual = train_model(uploaded_file)
                 st.session_state['vectorizer'] = vectorizer
                 st.session_state['models'] = models
-                st.session_state['df_visual'] = df_visual # Lưu data để vẽ biểu đồ
+                st.session_state['df_visual'] = df_visual
                 st.sidebar.success("Huấn luyện hoàn tất!")
             except Exception as e:
                 st.sidebar.error(f"Có lỗi xảy ra: {e}")
@@ -346,7 +339,6 @@ else:
 
 st.title("📱 Hệ Thống Phân Tích Cảm Xúc Điện Thoại")
 
-# TẠO TABS
 tab1, tab2 = st.tabs(["🔍 Phân Tích Bình Luận", "📊 Trực Quan Hóa Dữ Liệu"])
 
 # --- TAB 1: PHÂN TÍCH ---
@@ -361,7 +353,6 @@ with tab1:
         if 'models' not in st.session_state:
             st.error("⚠️ Vui lòng huấn luyện mô hình trước!")
         else:
-            # [cite_start]Predict Logic Hybrid [cite: 43-47]
             cleaned_text = clean_text_ultimate(user_input)
             vec_input = st.session_state['vectorizer'].transform([cleaned_text])
             
@@ -378,7 +369,6 @@ with tab1:
                 else:
                     pred_label = st.session_state['models'][aspect].predict(vec_input)[0] + 1
                 
-                # Bộ lọc Logic
                 if pred_label != 0:
                     if not has_aspect_keyword(text_lower_cleaned, aspect):
                         pred_label = 0
@@ -391,63 +381,52 @@ with tab1:
                                 pred_label = 0
                 ml_preds_vector.append(pred_label)
             
-            # Áp dụng Hard Rules
             final_preds = apply_hard_rules_hybrid(user_input, np.array(ml_preds_vector))
             
-            # --- TÍNH TOÁN KẾT LUẬN TỔNG QUAN ---
             active_sentiments = [p for p in final_preds if p != 0]
             
             st.markdown("---")
             
+            # Tính toán tổng quan
             if not active_sentiments:
-                st.warning("Không tìm thấy khía cạnh cụ thể nào trong bình luận.")
+                st.warning("Hệ thống chưa tìm thấy khía cạnh nào rõ ràng để kết luận tổng quan.")
             else:
                 n_pos = active_sentiments.count(3)
                 n_neg = active_sentiments.count(1)
-                n_neu = active_sentiments.count(2)
-
-                # Logic kết luận
+                
                 if n_pos > n_neg:
-                    overall_html = f"""
-                    <div class="overall-card positive">
-                        🌟 KẾT LUẬN: KHÁCH HÀNG HÀI LÒNG<br>
-                        <span style="font-size: 16px; font-weight: normal;">(Tích cực: {n_pos} | Tiêu cực: {n_neg})</span>
-                    </div>
-                    """
+                    overall_html = f"""<div class="overall-card positive">🌟 KẾT LUẬN: KHÁCH HÀNG HÀI LÒNG</div>"""
                 elif n_neg > n_pos:
-                    overall_html = f"""
-                    <div class="overall-card negative">
-                        😡 KẾT LUẬN: KHÁCH HÀNG KHÔNG HÀI LÒNG<br>
-                        <span style="font-size: 16px; font-weight: normal;">(Tích cực: {n_pos} | Tiêu cực: {n_neg})</span>
-                    </div>
-                    """
+                    overall_html = f"""<div class="overall-card negative">😡 KẾT LUẬN: KHÁCH HÀNG KHÔNG HÀI LÒNG</div>"""
                 else:
-                    overall_html = f"""
-                    <div class="overall-card neutral">
-                        ⚖️ KẾT LUẬN: ĐÁNH GIÁ TRUNG TÍNH / TRÁI CHIỀU<br>
-                        <span style="font-size: 16px; font-weight: normal;">(Tích cực: {n_pos} | Tiêu cực: {n_neg})</span>
-                    </div>
-                    """
+                    overall_html = f"""<div class="overall-card neutral">⚖️ KẾT LUẬN: ĐÁNH GIÁ TRUNG TÍNH / TRÁI CHIỀU</div>"""
                 
                 st.markdown(overall_html, unsafe_allow_html=True)
 
-                # --- HIỂN THỊ CHI TIẾT TỪNG KHÍA CẠNH ---
-                st.subheader("📝 Chi tiết phân tích:")
-                cols = st.columns(4)
-                col_idx = 0
-                for i, aspect in enumerate(ASPECTS):
-                    sentiment = final_preds[i]
-                    if sentiment != 0:
-                        color_class = "positive" if sentiment == 3 else "negative" if sentiment == 1 else "neutral"
-                        label_text = SENTIMENT_MAP[sentiment]
-                        with cols[col_idx % 4]:
-                            st.markdown(f"""
-                            <div class="metric-card {color_class}">
-                                <div>{aspect}</div>
-                                <div style="font-size: 1.2em;">{label_text}</div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        col_idx += 1
+            # [CẬP NHẬT GIAO DIỆN] Hiển thị tất cả nhãn, bao gồm cả nhãn 0
+            st.subheader("📝 Chi tiết phân tích:")
+            cols = st.columns(4)
+            col_idx = 0
+            
+            for i, aspect in enumerate(ASPECTS):
+                sentiment = final_preds[i]
+                
+                # Class CSS tương ứng
+                if sentiment == 3: color_class = "positive"
+                elif sentiment == 1: color_class = "negative"
+                elif sentiment == 2: color_class = "neutral"
+                else: color_class = "not-mentioned" # Class mới cho nhãn 0
+                
+                label_text = SENTIMENT_MAP[sentiment]
+                
+                with cols[col_idx % 4]:
+                    st.markdown(f"""
+                    <div class="metric-card {color_class}">
+                        <div>{aspect}</div>
+                        <div style="font-size: 1.1em; font-weight: normal;">{label_text}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                col_idx += 1
 
     with col2:
         st.markdown("### ℹ️ Hướng dẫn")
@@ -457,10 +436,11 @@ with tab1:
         2. Nhấn nút "Huấn luyện".
         3. Nhập bình luận và xem kết quả.
         
-        **Màu sắc:**
+        **Chú thích:**
         - 🟢 Xanh: Tích cực
         - 🔴 Đỏ: Tiêu cực
-        - 🔘 Xám: Trung tính
+        - 🔘 Xám Đậm: Trung tính
+        - ⚪ Xám Nhạt: Không được đề cập
         """)
         if 'models' in st.session_state:
             st.success("✅ Hệ thống đã sẵn sàng!")
@@ -482,7 +462,7 @@ with tab2:
         else:
             st.write("Không tìm thấy cột 'n_star'.")
 
-        # 2. Tổng quan Sentiment (Pie Chart)
+        # 2. Tổng quan Sentiment
         st.subheader("2. Tỷ lệ Cảm xúc Toàn hệ thống")
         polarity_counts = {
             "Negative": (df[ASPECTS] == 1).sum().sum(),
@@ -493,7 +473,7 @@ with tab2:
         ax2.pie(polarity_counts.values(), labels=polarity_counts.keys(), autopct='%1.1f%%', colors=['#dc3545', '#6c757d', '#28a745'])
         st.pyplot(fig2)
 
-        # 3. Phân phối theo Khía cạnh (Bar Chart)
+        # 3. Bar Chart
         st.subheader("3. Chi tiết Cảm xúc theo Khía cạnh")
         aspect_sentiment = pd.DataFrame({
             "Aspect": ASPECTS,
@@ -504,14 +484,14 @@ with tab2:
         fig3 = aspect_sentiment.set_index("Aspect").plot(kind="bar", figsize=(12, 6), color=['#dc3545', '#6c757d', '#28a745']).figure
         st.pyplot(fig3)
 
-        # 4. Heatmap Tương quan (Correlation)
+        # 4. Heatmap
         st.subheader("4. Ma trận Tương quan giữa các Khía cạnh")
         corr = df[ASPECTS].replace({0: np.nan}).corr()
         fig4, ax4 = plt.subplots(figsize=(10, 8))
         sns.heatmap(corr, annot=True, cmap="coolwarm", ax=ax4)
         st.pyplot(fig4)
 
-        # 5. WordCloud
+        # 5. WordCloud (ĐÃ SỬA LỖI CRASH)
         st.subheader("5. Từ khóa nổi bật (WordCloud)")
         col_wc1, col_wc2 = st.columns(2)
         
@@ -520,18 +500,29 @@ with tab2:
         
         with col_wc1:
             st.write("**Từ khóa Tích cực**")
-            if len(positive_text) > 0:
-                wc_pos = WordCloud(width=400, height=300, background_color="white").generate(positive_text)
-                fig_p, ax_p = plt.subplots()
-                ax_p.imshow(wc_pos, interpolation='bilinear')
-                ax_p.axis("off")
-                st.pyplot(fig_p)
+            # [FIX LỖI] Kiểm tra độ dài text để tránh crash
+            if len(positive_text.strip()) > 0:
+                try:
+                    wc_pos = WordCloud(width=400, height=300, background_color="white").generate(positive_text)
+                    fig_p, ax_p = plt.subplots()
+                    ax_p.imshow(wc_pos, interpolation='bilinear')
+                    ax_p.axis("off")
+                    st.pyplot(fig_p)
+                except ValueError:
+                    st.info("Dữ liệu không đủ để tạo WordCloud.")
+            else:
+                st.info("Không có dữ liệu tích cực.")
         
         with col_wc2:
             st.write("**Từ khóa Tiêu cực**")
-            if len(negative_text) > 0:
-                wc_neg = WordCloud(width=400, height=300, background_color="white", colormap="Reds").generate(negative_text)
-                fig_n, ax_n = plt.subplots()
-                ax_n.imshow(wc_neg, interpolation='bilinear')
-                ax_n.axis("off")
-                st.pyplot(fig_n)
+            if len(negative_text.strip()) > 0:
+                try:
+                    wc_neg = WordCloud(width=400, height=300, background_color="white", colormap="Reds").generate(negative_text)
+                    fig_n, ax_n = plt.subplots()
+                    ax_n.imshow(wc_neg, interpolation='bilinear')
+                    ax_n.axis("off")
+                    st.pyplot(fig_n)
+                except ValueError:
+                    st.info("Dữ liệu không đủ để tạo WordCloud.")
+            else:
+                st.info("Không có dữ liệu tiêu cực.")
