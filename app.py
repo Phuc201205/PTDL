@@ -44,7 +44,7 @@ st.markdown("""
     .negative {background-color: #dc3545; color: white; border: none;}
     .neutral {background-color: #6c757d; color: white; border: none;}
     
-    /* Style cho nhãn không rõ ràng (Mới) */
+    /* Style cho nhãn không rõ ràng */
     .not-mentioned {
         background-color: #f8f9fa; 
         color: #6c757d; 
@@ -67,7 +67,7 @@ st.markdown("""
 # --- CẤU HÌNH TỪ ĐIỂN ---
 ASPECTS = ['BATTERY', 'CAMERA', 'DESIGN', 'FEATURES', 'GENERAL', 'PERFORMANCE', 'PRICE', 'SCREEN', 'SER&ACC', 'STORAGE']
 
-# [CẬP NHẬT] Map hiển thị bao gồm cả nhãn 0
+# Map hiển thị bao gồm cả nhãn 0
 SENTIMENT_MAP = {
     0: '⚪ Không được đề cập rõ ràng',
     1: '🔴 Tiêu cực', 
@@ -403,7 +403,7 @@ with tab1:
                 
                 st.markdown(overall_html, unsafe_allow_html=True)
 
-            # [CẬP NHẬT GIAO DIỆN] Hiển thị tất cả nhãn, bao gồm cả nhãn 0
+            # Hiển thị chi tiết
             st.subheader("📝 Chi tiết phân tích:")
             cols = st.columns(4)
             col_idx = 0
@@ -411,11 +411,10 @@ with tab1:
             for i, aspect in enumerate(ASPECTS):
                 sentiment = final_preds[i]
                 
-                # Class CSS tương ứng
                 if sentiment == 3: color_class = "positive"
                 elif sentiment == 1: color_class = "negative"
                 elif sentiment == 2: color_class = "neutral"
-                else: color_class = "not-mentioned" # Class mới cho nhãn 0
+                else: color_class = "not-mentioned"
                 
                 label_text = SENTIMENT_MAP[sentiment]
                 
@@ -491,21 +490,24 @@ with tab2:
         sns.heatmap(corr, annot=True, cmap="coolwarm", ax=ax4)
         st.pyplot(fig4)
 
-        # 5. WordCloud (ĐÃ SỬA LỖI CRASH)
+        # 5. WordCloud (ĐÃ SỬA LỖI HOÀN TOÀN)
         st.subheader("5. Từ khóa nổi bật (WordCloud)")
         col_wc1, col_wc2 = st.columns(2)
         
         positive_text = " ".join(df[df[ASPECTS].eq(3).any(axis=1)]["comment_cleaned"])
         negative_text = " ".join(df[df[ASPECTS].eq(1).any(axis=1)]["comment_cleaned"])
         
+        # === Cột Tích Cực ===
         with col_wc1:
             st.write("**Từ khóa Tích cực**")
-            # [FIX LỖI] Kiểm tra độ dài text để tránh crash
             if len(positive_text.strip()) > 0:
                 try:
                     wc_pos = WordCloud(width=400, height=300, background_color="white").generate(positive_text)
                     fig_p, ax_p = plt.subplots()
+                    
+                    # [FIXED] Dùng .to_image() để tránh lỗi Numpy/Matplotlib mới
                     ax_p.imshow(wc_pos.to_image(), interpolation='bilinear')
+                    
                     ax_p.axis("off")
                     st.pyplot(fig_p)
                 except ValueError:
@@ -513,17 +515,20 @@ with tab2:
             else:
                 st.info("Không có dữ liệu tích cực.")
         
+        # === Cột Tiêu Cực ===
         with col_wc2:
             st.write("**Từ khóa Tiêu cực**")
             if len(negative_text.strip()) > 0:
                 try:
                     wc_neg = WordCloud(width=400, height=300, background_color="white", colormap="Reds").generate(negative_text)
                     fig_n, ax_n = plt.subplots()
-                    ax_n.imshow(wc_neg, interpolation='bilinear')
+                    
+                    # [FIXED] Dùng .to_image() ở đây nữa
+                    ax_n.imshow(wc_neg.to_image(), interpolation='bilinear')
+                    
                     ax_n.axis("off")
                     st.pyplot(fig_n)
                 except ValueError:
                     st.info("Dữ liệu không đủ để tạo WordCloud.")
             else:
                 st.info("Không có dữ liệu tiêu cực.")
-
